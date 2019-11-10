@@ -37,8 +37,11 @@ import tui
 from session import SSHSession
 from snoop import SSHSniffer
 
+
 def signal_handler(signal, frame):
-        logging.debug("Core: user tried an invalid signal {}".format(signal))
+    logging.debug("Core: user tried an invalid signal {}".format(signal))
+
+
 # Capture CTRL-C
 signal.signal(signal.SIGINT, signal_handler)
 
@@ -82,6 +85,11 @@ class User(object):
         self.allowed_ssh_hosts, self.hostgroups = self.hosts.list_allowed()
 
     def get_priv_key(self):
+        agent = paramiko.Agent()
+        keys = agent.get_keys()
+        if keys:
+            logging.info("SSHClient: Authenticating using Agent")
+            return keys[0]
         try:
             # TODO: check better identity options
             privkey = paramiko.RSAKey.from_private_key_file(
@@ -159,7 +167,7 @@ class Aker(object):
             session.start_session()
         finally:
             session.stop_sniffer()
-            self.tui.restore()
+            self.tui.stop()
             self.tui.hostlist.search.clear()  # Clear selected hosts
 
     def session_end_callback(self, session):
@@ -171,4 +179,31 @@ class Aker(object):
 
 
 if __name__ == '__main__':
-    Aker().build_tui()
+    aker = Aker()
+    command = os.environ.get('SSH_ORIGINAL_COMMAND', '').strip()
+    is_proxy = command.startswith('host=')
+    if is_proxy:
+        host = command.split(' ')[0][5:]
+        screen_size = [os.getenv('LINES', 80), os.getenv('COLUMNS', 300)]
+
+        session_uuid = uuid.uuid4()
+        session_start_time = time.strftime("%Y%m%d-%H%M%S")
+        session = SSHSession(aker, host, session_uuid)
+
+        sniffer = SSHSniffer(
+            aker.posix_user,
+            config.src_port,
+            host,
+            session_uuid,
+            screen_size)
+        session.attach_sniffer(sniffer)
+        logging.info(
+            "Core: Starting session UUID {0} for user {1} to host {2}".format(
+                session_uuid, aker.posix_user, host))
+        session.connect(screen_size)
+        try:
+            session.start_session()
+        finally:
+            session.stop_sniffer()
+    else:
+        aker.build_tui()

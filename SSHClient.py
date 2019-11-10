@@ -76,13 +76,6 @@ class SSHClient(Client):
     def start_session(self, user, auth_secret):
         try:
             transport = self.get_transport()
-            agent = paramiko.Agent()
-            keys = agent.get_keys()
-            if keys:
-                logging.debug("SSHClient: Authenticating using Agent")
-                for key in keys:
-                    transport.auth_publickey(user, key)
-                return
             if isinstance(auth_secret, basestring):
                 logging.debug("SSHClient: Authenticating using password")
                 transport.auth_password(user, auth_secret)
@@ -97,9 +90,7 @@ class SSHClient(Client):
                     transport.auth_password(user, getpass.getpass())
             self._start_session(transport)
         except Exception as e:
-            logging.error(
-                "SSHClient:: error authenticating : {0} ".format(
-                    e.message))
+            logging.exception("SSHClient:: error authenticating : {0} ".format(e.message))
             self._session.close_session()
             if transport:
                 transport.close()
@@ -130,7 +121,11 @@ class SSHClient(Client):
         except BaseException:
             pass
         self._set_sniffer_logs()
-        self.interactive_shell(self.channel)
+        is_interactive = not os.environ.has_key('SSH_ORIGINAL_COMMAND')
+        if is_interactive:
+            self.interactive_shell(self.channel)
+        else:
+            self.run_command(self.channel)
         self.channel.close()
         self._session.close_session()
         transport.close()
@@ -145,6 +140,44 @@ class SSHClient(Client):
         for sniffer in self.sniffers:
             sniffer.sigwinch(columns, lines)
 
+    def run_command(self, chan):
+        sys.stdout.flush()
+        # tty.setraw(sys.stdin.fileno())
+        # tty.setcbreak(sys.stdin.fileno())
+        # chan.settimeout(0.0)
+        # r, w, e = select.select([chan, sys.stdin], [], [])
+        # flag = fcntl.fcntl(sys.stdin, fcntl.F_GETFL, 0)
+        # fcntl.fcntl(
+        #     sys.stdin.fileno(),
+        #     fcntl.F_SETFL,
+        #     flag | os.O_NONBLOCK)
+        # if chan in r:
+        command = os.environ['SSH_ORIGINAL_COMMAND'] + "\n"
+        # ran = False
+        # while True:
+        #     x = chan.recv(10240)
+        #     if len(x) == 0:
+        #         logging.info("*** Connection terminated\r")
+        #         sys.exit(3)
+        #     for sniffer in self.sniffers:
+        #         sniffer.channel_filter(x)
+        #     nbytes = os.write(sys.stdout.fileno(), x)
+        #     logging.debug(
+        #         "SSHClient: wrote %s bytes to stdout" % nbytes)
+        #     sys.stdout.flush()
+        #     if ran:
+        #         chan.send('exit\n')
+        #     else:
+        chan.send(command)
+        for sniffer in self.sniffers:
+            sniffer.stdin_filter(command)
+        self.interactive_shell(self.channel)
+                # ran = True
+        # x = chan.recv(10240)
+        # for sniffer in self.sniffers:
+        #     sniffer.channel_filter(x)
+        # os.write(sys.stdout.fileno(), x)
+
     def interactive_shell(self, chan):
         """
         Handles ssh IO
@@ -155,7 +188,6 @@ class SSHClient(Client):
             tty.setraw(sys.stdin.fileno())
             tty.setcbreak(sys.stdin.fileno())
             chan.settimeout(0.0)
-
             while True:
                 try:
                     r, w, e = select.select([chan, sys.stdin], [], [])
@@ -186,7 +218,6 @@ class SSHClient(Client):
                                 continue
                     except socket.timeout:
                         pass
-
                 if sys.stdin in r:
                     try:
                         buf = os.read(sys.stdin.fileno(), 4096)
@@ -200,4 +231,5 @@ class SSHClient(Client):
 
         finally:
             logging.debug("SSHClient: interactive session ending")
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, oldtty)
+            if not is_command:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, oldtty)
