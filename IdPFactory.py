@@ -8,29 +8,18 @@
 __license__ = "AGPLv3"
 __author__ = 'Ahmed Nazmy <ahmed@nazmy.io>'
 
-
-import logging
 import importlib
-import sys
-import os
+import logging
 
 
 class IdPFactory(object):
 
     @staticmethod
     def getIdP(choice):
-
-        logging.info(
-            "IdPFactory: trying dynamic loading of module : {0} ".format(choice))
-        # load module from subdir idp
+        logging.info("IdPFactory: trying dynamic loading of module : {0} ".format(choice))
         idp = "idp." + choice
-        try:
-            idp_module = importlib.import_module(idp)
-            idp_class = getattr(idp_module, choice)
-        except Exception as e:
-            logging.error(
-                "IdPFactory: error loading module : {0}".format(
-                    e.message))
+        idp_module = importlib.import_module(idp)
+        idp_class = getattr(idp_module, choice)
 
         return idp_class
 

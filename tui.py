@@ -7,12 +7,10 @@
 __license__ = "AGPLv3"
 __author__ = 'Ahmed Nazmy <ahmed@nazmy.io>'
 
+import logging
 
 import urwid
-import aker
-import signal
-import logging
-import os
+
 from popup import SimplePopupLauncher
 
 

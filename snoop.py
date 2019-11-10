@@ -7,15 +7,15 @@
 __license__ = "AGPLv3"
 __author__ = 'Ahmed Nazmy <ahmed@nazmy.io>'
 
-
-import logging
 import codecs
+import errno
+import json
+import logging
+import os
 import re
 import time
-import json
-import os
+
 import pyte
-import errno
 
 
 class Sniffer(object):
@@ -48,7 +48,7 @@ class Sniffer(object):
             "Sniffer: Creating Pyte screen with cols %i and rows %i" %
             (self.term_cols, self.term_rows))
         self.screen = pyte.Screen(self.term_cols, self.term_rows)
-        self.stream = pyte.ByteStream()
+        self.stream = pyte.Stream()
         self.stream.attach(self.screen)
 
     def extract_command(self, buf):
@@ -67,7 +67,7 @@ class Sniffer(object):
             output = "".join(
                 [l for l in self.screen.display if len(l.strip()) > 0]).strip()
             # for line in reversed(self.screen.buffer):
-            #output = "".join(map(operator.attrgetter("data"), line)).strip()
+            # output = "".join(map(operator.attrgetter("data"), line)).strip()
             logging.debug("output is %s" % output)
             command = self.ps1_parser(output)
         except Exception as e:
@@ -78,7 +78,8 @@ class Sniffer(object):
         self.screen.reset()
         return command
 
-    def ps1_parser(self, command):
+    @staticmethod
+    def ps1_parser(command):
         """
         Extract commands from PS1 or mysql>
         """
@@ -128,12 +129,9 @@ class Sniffer(object):
                 logging.error(
                     "Sniffer: set_logs OS Error {0} ".format(
                         e.message))
-        try:
-            log_file = open(log_file_path + '.log', 'a')
-            log_timer = open(log_file_path + '.timer', 'a')
-            log_cmds = log_file_path + '.cmds'
-        except IOError:
-            logging.debug("Sniffer: set_logs IO error {0} ".format(e.message))
+        log_file = open(log_file_path + '.log', 'a')
+        log_timer = open(log_file_path + '.timer', 'a')
+        log_cmds = log_file_path + '.cmds'
 
         log_file.write('Session Start %s\r\n' % self.session_date_time)
         self.log_file = log_file
@@ -201,7 +199,7 @@ class SSHSniffer(Sniffer):
                 now_timestamp -
                 self.before_timestamp,
                 4),
-                len(x)))
+             len(x)))
         self.log_timer.flush()
         self.log_file.write(x)
         self.log_file.flush()

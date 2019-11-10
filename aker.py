@@ -20,20 +20,17 @@ __license_info__ = {
     }
 }
 
+import getpass
 import logging
 import os
-import sys
-import uuid
-import getpass
-import paramiko
-import socket
-from configparser import ConfigParser, NoOptionError
-import time
 import signal
-import sys
+import uuid
 
-from hosts import Hosts
+import paramiko
+from configparser import ConfigParser, NoOptionError
+
 import tui
+from hosts import Hosts
 from session import SSHSession
 from snoop import SSHSniffer
 
@@ -67,7 +64,7 @@ class Configuration(object):
         if len(args) == 3:
             try:
                 return self.configparser.get(args[0], args[1])
-            except NoOptionError as e:
+            except NoOptionError:
                 return args[2]
         if len(args) == 2:
             return self.configparser.get(args[0], args[1])
@@ -91,7 +88,6 @@ class User(object):
             logging.info("SSHClient: Authenticating using Agent")
             return keys[0]
         try:
-            # TODO: check better identity options
             privkey = paramiko.RSAKey.from_private_key_file(
                 os.path.expanduser("~/.ssh/id_rsa"))
         except Exception as e:
@@ -114,13 +110,14 @@ class Aker(object):
     """ Aker core module, this is the management module
     """
 
-    def __init__(self, log_level='INFO'):
+    def __init__(self):
         global config
         config = Configuration(config_file)
         self.config = config
         self.posix_user = getpass.getuser()
         self.log_level = config.log_level
         self.port = config.ssh_port
+        self.tui = None
 
         # Setup logging first thing
         for handler in logging.root.handlers[:]:
@@ -147,11 +144,8 @@ class Aker(object):
         screen_size = self.tui.loop.screen.get_cols_rows()
         logging.debug("Core: pausing TUI")
         self.tui.pause()
-        # TODO: check for shorter yet unique uuid
         session_uuid = uuid.uuid4()
-        session_start_time = time.strftime("%Y%m%d-%H%M%S")
         session = SSHSession(self, host, session_uuid)
-        # TODO: add err handling
         sniffer = SSHSniffer(
             self.posix_user,
             config.src_port,
@@ -178,17 +172,23 @@ class Aker(object):
                 session.host))
 
 
-if __name__ == '__main__':
+def main():
     aker = Aker()
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '').strip()
-    is_proxy = command.startswith('host=')
+    is_proxy = 'host=' in command
     if is_proxy:
-        host = command.split(' ')[0][5:]
+        port = 23
+        host = None
+        for term in command.split(' '):
+            if term.startswith('host='):
+                host = term[5:]
+            if term.startswith('port='):
+                port = term[5:]
+        assert host is not None
         screen_size = [os.getenv('LINES', 80), os.getenv('COLUMNS', 300)]
 
         session_uuid = uuid.uuid4()
-        session_start_time = time.strftime("%Y%m%d-%H%M%S")
-        session = SSHSession(aker, host, session_uuid)
+        session = SSHSession(aker, host, session_uuid, port)
 
         sniffer = SSHSniffer(
             aker.posix_user,
@@ -207,3 +207,7 @@ if __name__ == '__main__':
             session.stop_sniffer()
     else:
         aker.build_tui()
+
+
+if __name__ == '__main__':
+    main()

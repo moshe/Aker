@@ -7,7 +7,6 @@
 # Meta
 
 import urwid
-import logging
 
 
 class SimplePopupDialog(urwid.WidgetWrap):

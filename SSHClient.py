@@ -7,19 +7,20 @@
 __license__ = "AGPLv3"
 __author__ = 'Ahmed Nazmy <ahmed@nazmy.io>'
 
-import logging
-import paramiko
-import socket
-import tty
-import sys
-import termios
-import signal
-import select
-import os
 import errno
-import time
 import fcntl
 import getpass
+import logging
+import os
+import select
+import signal
+import socket
+import struct
+import sys
+import termios
+import tty
+
+import paramiko
 
 TIME_OUT = 10
 
@@ -38,19 +39,14 @@ class Client(object):
 
     @staticmethod
     def get_console_dimensions():
-        cols, lines = 80, 24
-        try:
-            fmt = 'HH'
-            buffer = struct.pack(fmt, 0, 0)
-            result = fcntl.ioctl(
-                sys.stdout.fileno(),
-                termios.TIOCGWINSZ,
-                buffer)
-            columns, lines = struct.unpack(fmt, result)
-        except Exception as e:
-            pass
-        finally:
-            return columns, lines
+        fmt = 'HH'
+        abuffer = struct.pack(fmt, 0, 0)
+        result = fcntl.ioctl(
+            sys.stdout.fileno(),
+            termios.TIOCGWINSZ,
+            abuffer)
+        columns, lines = struct.unpack(fmt, result)
+        return columns, lines
 
 
 class SSHClient(Client):
@@ -58,6 +54,7 @@ class SSHClient(Client):
         super(SSHClient, self).__init__(session)
         self._socket = None
         self.channel = None
+        self._size = None
         logging.debug("Client: Client Created")
 
     def connect(self, ip, port, size):
@@ -74,8 +71,8 @@ class SSHClient(Client):
         return transport
 
     def start_session(self, user, auth_secret):
+        transport = self.get_transport()
         try:
-            transport = self.get_transport()
             if isinstance(auth_secret, basestring):
                 logging.debug("SSHClient: Authenticating using password")
                 transport.auth_password(user, auth_secret)
@@ -83,19 +80,15 @@ class SSHClient(Client):
                 try:
                     logging.debug("SSHClient: Authenticating using key-pair")
                     transport.auth_publickey(user, auth_secret)
-                # Failed to authenticate with SSH key, so
-                # try a password instead.
                 except paramiko.ssh_exception.AuthenticationException:
                     logging.debug("SSHClient: Authenticating using password")
                     transport.auth_password(user, getpass.getpass())
             self._start_session(transport)
-        except Exception as e:
-            logging.exception("SSHClient:: error authenticating : {0} ".format(e.message))
+        finally:
             self._session.close_session()
             if transport:
                 transport.close()
             self._socket.close()
-            raise e
 
     def attach(self, sniffer):
         """
@@ -115,24 +108,25 @@ class SSHClient(Client):
         self.channel = transport.open_session()
         columns, lines = self._size
         self.channel.get_pty('xterm', columns, lines)
-        self.channel.invoke_shell()
         try:
             signal.signal(signal.SIGWINCH, self.sigwinch)
-        except BaseException:
+        except Exception:
             pass
         self._set_sniffer_logs()
-        is_interactive = not os.environ.has_key('SSH_ORIGINAL_COMMAND')
+        is_interactive = 'SSH_ORIGINAL_COMMAND' not in os.environ
         if is_interactive:
-            self.interactive_shell(self.channel)
+            self.channel.invoke_shell()
+            self.interactive_shell()
         else:
-            self.run_command(self.channel)
+            self.channel.exec_command(os.environ['SSH_ORIGINAL_COMMAND'])
+            self.run_command()
         self.channel.close()
         self._session.close_session()
         transport.close()
         self._socket.close()
 
     def sigwinch(self, signal, data):
-        columns, lines = get_console_dimensions()
+        columns, lines = self.get_console_dimensions()
         logging.debug(
             "SSHClient: setting terminal to %s columns and %s lines" %
             (columns, lines))
@@ -140,45 +134,14 @@ class SSHClient(Client):
         for sniffer in self.sniffers:
             sniffer.sigwinch(columns, lines)
 
-    def run_command(self, chan):
+    def run_command(self):
         sys.stdout.flush()
-        # tty.setraw(sys.stdin.fileno())
-        # tty.setcbreak(sys.stdin.fileno())
-        # chan.settimeout(0.0)
-        # r, w, e = select.select([chan, sys.stdin], [], [])
-        # flag = fcntl.fcntl(sys.stdin, fcntl.F_GETFL, 0)
-        # fcntl.fcntl(
-        #     sys.stdin.fileno(),
-        #     fcntl.F_SETFL,
-        #     flag | os.O_NONBLOCK)
-        # if chan in r:
-        command = os.environ['SSH_ORIGINAL_COMMAND'] + "\n"
-        # ran = False
-        # while True:
-        #     x = chan.recv(10240)
-        #     if len(x) == 0:
-        #         logging.info("*** Connection terminated\r")
-        #         sys.exit(3)
-        #     for sniffer in self.sniffers:
-        #         sniffer.channel_filter(x)
-        #     nbytes = os.write(sys.stdout.fileno(), x)
-        #     logging.debug(
-        #         "SSHClient: wrote %s bytes to stdout" % nbytes)
-        #     sys.stdout.flush()
-        #     if ran:
-        #         chan.send('exit\n')
-        #     else:
-        chan.send(command)
+        command = os.environ['SSH_ORIGINAL_COMMAND']
         for sniffer in self.sniffers:
             sniffer.stdin_filter(command)
-        self.interactive_shell(self.channel)
-                # ran = True
-        # x = chan.recv(10240)
-        # for sniffer in self.sniffers:
-        #     sniffer.channel_filter(x)
-        # os.write(sys.stdout.fileno(), x)
+        self.interactive_shell()
 
-    def interactive_shell(self, chan):
+    def interactive_shell(self):
         """
         Handles ssh IO
         """
@@ -187,22 +150,17 @@ class SSHClient(Client):
         try:
             tty.setraw(sys.stdin.fileno())
             tty.setcbreak(sys.stdin.fileno())
-            chan.settimeout(0.0)
+            self.channel.settimeout(0.0)
             while True:
-                try:
-                    r, w, e = select.select([chan, sys.stdin], [], [])
-                    flag = fcntl.fcntl(sys.stdin, fcntl.F_GETFL, 0)
-                    fcntl.fcntl(
-                        sys.stdin.fileno(),
-                        fcntl.F_SETFL,
-                        flag | os.O_NONBLOCK)
-                except Exception as e:
-                    logging.error(e)
-                    pass
-
-                if chan in r:
+                r, w, e = select.select([self.channel, sys.stdin], [], [])
+                flag = fcntl.fcntl(sys.stdin, fcntl.F_GETFL, 0)
+                fcntl.fcntl(
+                    sys.stdin.fileno(),
+                    fcntl.F_SETFL,
+                    flag | os.O_NONBLOCK)
+                if self.channel in r:
                     try:
-                        x = chan.recv(10240)
+                        x = self.channel.recv(10240)
                         len_x = len(x)
                         if len_x == 0:
                             break
@@ -219,17 +177,12 @@ class SSHClient(Client):
                     except socket.timeout:
                         pass
                 if sys.stdin in r:
-                    try:
-                        buf = os.read(sys.stdin.fileno(), 4096)
-                    except OSError as e:
-                        logging.error(e)
-                        pass
+                    buf = os.read(sys.stdin.fileno(), 4096)
                     for sniffer in self.sniffers:
                         sniffer.stdin_filter(buf)
 
-                    chan.send(buf)
+                    self.channel.send(buf)
 
         finally:
             logging.debug("SSHClient: interactive session ending")
-            if not is_command:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, oldtty)
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, oldtty)

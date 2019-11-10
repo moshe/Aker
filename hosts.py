@@ -9,7 +9,9 @@ __author__ = 'Ahmed Nazmy <ahmed@nazmy.io>'
 
 import json
 import logging
+
 import redis
+
 from IdPFactory import IdPFactory
 
 
