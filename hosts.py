@@ -111,14 +111,11 @@ class Hosts(object):
             try:
                 for k, v in result.iteritems():
                     # Deserialize back from redis
-                    hostentry = Host(
-                        json.loads(v)['name'],
-                        json.loads(v)['fqdn'],
-                        json.loads(v)['hostgroups'])
+                    host = json.loads(v)
+                    hostentry = Host(host['name'], host['fqdn'], host['hostgroups'])
                     self._allowed_ssh_hosts[hostentry.name] = hostentry
                     logging.debug(
-                        "Hosts: loading host {0} from cache".format(
-                            hostentry.name))
+                        "Hosts: loading host {0} from cache".format(hostentry.name))
                     cached = True
             except Exception as e:
                 logging.error("Hosts: redis error: {0}".format(e.message))

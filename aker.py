@@ -24,6 +24,7 @@ import getpass
 import logging
 import os
 import signal
+import sys
 import uuid
 
 import paramiko
@@ -173,11 +174,12 @@ class Aker(object):
 
 
 def main():
+    os.popen('kinit -k').read()
     aker = Aker()
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '').strip()
     is_proxy = 'host=' in command
     if is_proxy:
-        port = 23
+        port = 22
         host = None
         for term in command.split(' '):
             if term.startswith('host='):
