@@ -21,7 +21,6 @@ import time
 import fcntl
 import getpass
 
-
 TIME_OUT = 10
 
 
@@ -77,6 +76,13 @@ class SSHClient(Client):
     def start_session(self, user, auth_secret):
         try:
             transport = self.get_transport()
+            agent = paramiko.Agent()
+            keys = agent.get_keys()
+            if keys:
+                logging.debug("SSHClient: Authenticating using Agent")
+                for key in keys:
+                    transport.auth_publickey(user, key)
+                return
             if isinstance(auth_secret, basestring):
                 logging.debug("SSHClient: Authenticating using password")
                 transport.auth_password(user, auth_secret)
